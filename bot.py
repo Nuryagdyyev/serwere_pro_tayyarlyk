@@ -2,8 +2,15 @@
 AKADEMIK IŞLER BOT — ŞAHSY WERSIÝA (tölegsiz)
 Bot → TÜRKMEN dilinde | Faýl → HEMIŞE RUS dilinde
 Render.com | Python 3.11
+ 
+🔧 DÜZEDILEN WERSIÝA:
+- Accept-Encoding: identity → "invalid distance too far back" çözüldi
+- Şablon global cache → çalt we durnukly
+- F.video handler dubl düzedildi
+- Token/API key diňe env-den
+- Redis URL env-den
 """
-
+ 
 import asyncio, base64, copy, io, json, logging, os, re
 import httpx
 from aiogram import Bot, Dispatcher, F, Router
@@ -25,18 +32,25 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
-
+ 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger(__name__)
-
+ 
 # ── SAZLAMALAR ──────────────────────────────────────────────
-# Render'de "Environment Variables" bölümünde goý:
+# Render'de "Environment Variables" bölümünde HÖKMAN goý:
 #   BOT_TOKEN        = siziň bot tokeniniz
 #   DEEPSEEK_API_KEY = siziň DeepSeek açaryňyz
-# Eger goýmasaňyz, aşakdaky default bahalary ulanylýar:
-BOT_TOKEN        = os.getenv("BOT_TOKEN",        "8729971482:AAEUwMqHhJvknmMwnRBj37b_CZiJO1NUj5g")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-654b0beea3fb472b98c5be657dac6351")
-
+#   REDIS_URL        = (islege bagly) redis://...
+BOT_TOKEN        = os.getenv("BOT_TOKEN")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+REDIS_URL        = os.getenv("REDIS_URL")
+ 
+if not BOT_TOKEN or not DEEPSEEK_API_KEY:
+    raise RuntimeError(
+        "❌ BOT_TOKEN we DEEPSEEK_API_KEY env-de goýulmaly!\n"
+        "Render dashboard → Environment Variables bölümüne git we goý."
+    )
+ 
 ADMIN_IDS        = [8512644114, 7404431806]
 INTRO_VIDEO_URL  = "https://youtu.be/8YD65xbNwOQ?si=ouD9EA283C3MPV1X"
 DEEPSEEK_URL     = "https://api.deepseek.com/v1/chat/completions"
@@ -45,8 +59,8 @@ CARD_NUMBER      = "2202 2084 5873 0067"
 PHONE_NUMBER     = "+7 922 309 80 64"
 CARD_HOLDER      = "Мекан Н"
 PRICE            = {"referat": 300, "doklad": 300, "zadaniye": 150}
-
-
+ 
+ 
 TEMPLATE_B64 = (
     "UEsDBBQABgAIAAAAIQBKvAJxbQEAACgGAAATAAgCW0NvbnRlbnRfVHlwZXNdLnhtbCCiBAIooAACAAAA"
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -111,7 +125,7 @@ TEMPLATE_B64 = (
     "r8Df9PgD2P03PIq+IPMI3A6wV4r+lnVikgGdlKGotKHgKkuBzgKdU6ITd6/Ek1zcr4L3o2gPprh4/bKE"
     "3lKYEONWWNw4uE0wTKAZ7U1UncnAj7e4gEGnTDUDpnhV5xjxAo17ratgeXxTYk1VVVm/JkldDnsfKpRd"
     "KC9hjeZxfNMUI9LKfI4yfCi+x0l6BW/xjoNTu+U5TdQ1ptgtfym2XP1uJaVGK5pUbG5cbDZRGq+yFJt7"
-    "2i1JDK2jMpw9m1jhguGKbPy5S9JKPH2agWtu0JyWfbl3b66p/qz5NfkIF42VSY5wrW+IzJ8505JbdVLF"
+    "2i1JDK2jMpw9m1jhguGKbPy5S9JKPH2agWtu0JyWfbl3b66p/qz5NfkIF42VSY5wrW+IzJ85y0JbdVLF"
     "aU9wJV3mTeTozes4Yuk+Dw9xBZOcv9omG7hLZGv2cbRTHXMOnNpAG/2VZHxRAjsY8r6CWdrL6HG0B09v"
     "U4MYjyi8hsCd8Cco4e+YBfM+iW3raDeTr4HhaoymijlsxGnl66KJGy/Kg01ws/AYI3GwtXg2scWXeYBT"
     "VVpiLtrEVzBxoZnICCqnsGwOv0rBxIVhokDVeEPUZ74XqWDiHJnIGgbH8sbMt28WTJwjE2lBFRVJziGJ"
@@ -339,12 +353,28 @@ TEMPLATE_B64 = (
     "xKVyAQAAxgIAABAAAAAAAAAAAAAAAAAAxD0AAGRvY1Byb3BzL2FwcC54bWxQSwUGAAAAAA0ADQBAAwAA"
     "bEAAAAAA"
 )
-
-
+ 
+ 
+# ✅ DÜZEDIŞ #2: Şablon BIR GEZEK module-yň ýüklenmeginde açylýar we cache-lenýär
+try:
+    _TEMPLATE_BYTES_CACHE = base64.b64decode(TEMPLATE_B64)
+    # Barlag — bu hakyky DOCX (ZIP) faýlymy?
+    if _TEMPLATE_BYTES_CACHE[:4] != b'PK\x03\x04':
+        log.error("❌ TEMPLATE_B64 ZIP faýly däl!")
+        _TEMPLATE_BYTES_CACHE = None
+    else:
+        log.info(f"✅ Şablon cache-lendi ({len(_TEMPLATE_BYTES_CACHE)} baýt)")
+except Exception as e:
+    log.error(f"❌ TEMPLATE_B64 açylmady: {e}")
+    _TEMPLATE_BYTES_CACHE = None
+ 
+ 
 def _get_template_bytes() -> bytes:
-    return base64.b64decode(TEMPLATE_B64)
-
-
+    if _TEMPLATE_BYTES_CACHE is None:
+        raise RuntimeError("Şablon ýüklenmedi — TEMPLATE_B64 barla!")
+    return _TEMPLATE_BYTES_CACHE
+ 
+ 
 class St(StatesGroup):
     s01  = State()
     s02  = State()
@@ -366,8 +396,8 @@ class St(StatesGroup):
     szad2 = State()
     szad3 = State()
     s02b_more = State()
-
-
+ 
+ 
 PENDING: dict[int, dict] = {}
 SEEN_USERS: set = set()
 REQ_ITEMS: dict[int, list] = {}
@@ -377,14 +407,14 @@ CANCELLED_GENERATES: set = set()
 ZADANIYE_GENERATING: set = set()
 SVC_RU = {"referat": "Реферат", "doklad": "Доклад", "zadaniye": "Задание"}
 SVC_TM = {"referat": "Referat 📄", "doklad": "Doklad 🎤", "zadaniye": "Zadaniye 📝"}
-
-
+ 
+ 
 def kb(*rows) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t, callback_data=c) for t, c in row]
         for row in rows
     ])
-
+ 
 KB_SVC  = kb(
     [("📄  Referat  — 300 ₽","svc:referat")],
     [("🎤  Doklad   — 300 ₽","svc:doklad")],
@@ -404,7 +434,7 @@ KB_SKIP = kb([("⏭️  Mugallym ýok — geç","skip:teacher")],
 KB_BACK     = kb([("🔙  Yza","back:start")])
 KB_REQ_DONE = kb([("✅  Talaplarym taýar — dowam et","req:done")],
                  [("🔙  Yza — başa gaýt","back:start")])
-
+ 
 def kb_src() -> InlineKeyboardMarkup:
     rows, row = [], []
     for i in range(8, 21):
@@ -413,8 +443,8 @@ def kb_src() -> InlineKeyboardMarkup:
             rows.append(row); row = []
     if row: rows.append(row)
     return kb(*rows)
-
-
+ 
+ 
 async def ask(obj, text: str, markup=None) -> Message:
     kw = dict(parse_mode="HTML", reply_markup=markup)
     if isinstance(obj, CallbackQuery):
@@ -423,23 +453,23 @@ async def ask(obj, text: str, markup=None) -> Message:
         except Exception:
             return await obj.message.answer(text, **kw)
     return await obj.answer(text, **kw)
-
+ 
 def md_clean(t: str) -> str:
     t = re.sub(r"\*\*(.*?)\*\*", r"\1", t)
     t = re.sub(r"\*(.*?)\*", r"\1", t)
     t = re.sub(r"^#{1,6}\s*", "", t, flags=re.M)
     return t.strip()
-
+ 
 def spc_float(k: str) -> float:
     return {"default":1.5,"1.0":1.0,"1.25":1.25,"1.5":1.5}.get(k, 1.5)
-
+ 
 def spc_str(k: str) -> str:
     return {"default":"1.5","1.0":"1.0","1.25":"1.25","1.5":"1.5"}.get(k, "1.5")
-
+ 
 def lv(spc) -> int:
     return {1.0:240, 1.25:300, 1.5:360}.get(spc, 360)
-
-
+ 
+ 
 def build_zadaniye_prompt(d: dict) -> str:
     req_text = d.get("req_text", "").strip()
     if req_text:
@@ -462,8 +492,8 @@ def build_zadaniye_prompt(d: dict) -> str:
         f"• Все перечисления нумеруй: 1. 2. 3. (не используй маркеры •/—)\n\n"
         f"Начинай СРАЗУ с первого предложения абзаца, без каких-либо предисловий."
     )
-
-
+ 
+ 
 def build_prompt(d: dict) -> str:
     svc   = SVC_RU.get(d["service"], "Реферат")
     pages = int(d["pages"])
@@ -517,8 +547,8 @@ def build_prompt(d: dict) -> str:
         f"• Все перечисления нумеруй: 1. 2. 3. (не используй маркеры •/—)\n"
         f"• Начинай с ##ВВЕДЕНИЕ##:"
     )
-
-
+ 
+ 
 STAGES = [
     (5,  "🔍 Tema seljerilýär..."),
     (15, "📚 Çeşmeler gözlenýär..."),
@@ -529,12 +559,15 @@ STAGES = [
     (93, "📑 Çeşmeler sanawy..."),
     (97, "🔧 Jemlenýär..."),
 ]
-
+ 
 async def call_deepseek(d: dict, on_progress) -> str:
     prompt  = build_zadaniye_prompt(d) if d.get("service") == "zadaniye" else build_prompt(d)
+    # ✅ DÜZEDIŞ #1: Accept-Encoding: identity → "invalid distance too far back" ýalňyşlygyny aýyrýar
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type":  "application/json",
+        "Accept-Encoding": "identity",   # gzip/br gysyşy öçür — bozulan paketler sebäpli ýalňyşlyk çykmaz
+        "Accept": "application/json",
     }
     req_items = d.get("req_items", [])
     extra_texts = []
@@ -568,7 +601,7 @@ async def call_deepseek(d: dict, on_progress) -> str:
     result: dict = {}
     error:  dict = {}
     done:   dict = {"flag": False}
-
+ 
     async def fetch():
         max_retries = 5
         last_exc    = None
@@ -605,7 +638,7 @@ async def call_deepseek(d: dict, on_progress) -> str:
                 await asyncio.sleep(wait)
         error["exc"] = last_exc
         done["flag"] = True
-
+ 
     async def ticker():
         stage_idx = 0
         elapsed   = 0
@@ -624,7 +657,7 @@ async def call_deepseek(d: dict, on_progress) -> str:
                 await on_progress(pct, status)
             except Exception:
                 pass
-
+ 
     done["flag"] = False
     ft = asyncio.create_task(fetch())
     tt = asyncio.create_task(ticker())
@@ -641,8 +674,8 @@ async def call_deepseek(d: dict, on_progress) -> str:
         raise error["exc"]
     await on_progress(100, "✅ Taýar!")
     return result["text"]
-
-
+ 
+ 
 def parse_ai(raw: str, secs: int) -> dict:
     def _between(text, start, *ends):
         s = text.find(start)
@@ -652,7 +685,7 @@ def parse_ai(raw: str, secs: int) -> dict:
             p = text.find(e, s)
             if p != -1 and p < best: best = p
         return text[s:best].strip()
-
+ 
     intro_raw = _between(raw, "##ВВЕДЕНИЕ##", "##ГЛАВА_1##", "##ЗАКЛЮЧЕНИЕ##", "##СПИСОК_ЛИТЕРАТУРЫ##")
     chapters: list = []
     for i in range(1, secs + 1):
@@ -679,8 +712,8 @@ def parse_ai(raw: str, secs: int) -> dict:
         conclusion = [ln.strip() for ln in conc_raw.splitlines() if ln.strip()],
         sources    = sources,
     )
-
-
+ 
+ 
 def _sf(run, size_pt=14, bold=False, italic=False):
     run.font.name = "Times New Roman"; run.font.size = Pt(size_pt)
     run.bold = bold; run.italic = italic
@@ -694,7 +727,7 @@ def _sf(run, size_pt=14, bold=False, italic=False):
         el = rpr.find(qn(tag))
         if el is None: el = OxmlElement(tag); rpr.append(el)
         el.set(qn("w:val"), str(size_pt * 2))
-
+ 
 def _spf(para, align, line, first_line=0, left=0, hanging=0, space_after=0):
     pPr = para._p.get_or_add_pPr()
     sp  = pPr.find(qn("w:spacing"))
@@ -713,18 +746,18 @@ def _spf(para, align, line, first_line=0, left=0, hanging=0, space_after=0):
     jc = pPr.find(qn("w:jc"))
     if jc is None: jc = OxmlElement("w:jc"); pPr.append(jc)
     jc.set(qn("w:val"), align)
-
+ 
 def _para(doc, text, *, bold=False, italic=False, center=False,
           size_pt=14, line=360, first_line=851, space_after=0):
     p = doc.add_paragraph(); r = p.add_run(text)
     _sf(r, size_pt, bold, italic)
     _spf(p, "center" if center else "both", line, first_line=first_line, space_after=space_after)
-
+ 
 def _page_break(doc):
     p = doc.add_paragraph(); r = p.add_run()
     br = OxmlElement("w:br"); br.set(qn("w:type"), "page"); r._r.append(br)
     _spf(p, "both", 360)
-
+ 
 def _init_heading(doc):
     try:    st = doc.styles["Heading 1"]
     except: st = doc.styles.add_style("Heading 1", 1)
@@ -739,7 +772,7 @@ def _init_heading(doc):
     ol = pPr.find(qn("w:outlineLvl"))
     if ol is None: ol = OxmlElement("w:outlineLvl"); pPr.append(ol)
     ol.set(qn("w:val"), "0")
-
+ 
 def _heading(doc, text: str, line_v: int):
     p = doc.add_paragraph(style="Heading 1")
     for run in p.runs: run.text = ""
@@ -750,7 +783,7 @@ def _heading(doc, text: str, line_v: int):
     p.paragraph_format.space_before      = Pt(0)
     p.paragraph_format.space_after       = Pt(0)
     _spf(p, "center", line_v, first_line=0)
-
+ 
 def _set_p_text(new_p, text: str):
     r_els = new_p.findall(f".//{qn('w:r')}")
     written = False
@@ -762,7 +795,7 @@ def _set_p_text(new_p, text: str):
                 written = True
             else:
                 t_el.text = ""
-
+ 
 def _copy_template_title(doc: Document, d: dict):
     svc_ru      = SVC_RU.get(d["service"], "Реферат")
     teacher     = d.get("teacher", "").strip()
@@ -775,13 +808,13 @@ def _copy_template_title(doc: Document, d: dict):
     sectPr = body.find(qn("w:sectPr"))
     skip_teacher = set(range(25, 34)) if not has_teacher else set()
     skip = skip_teacher | {37, 38, 39}
-
+ 
     def _append(p_el):
         if sectPr is not None:
             body.insert(list(body).index(sectPr), p_el)
         else:
             body.append(p_el)
-
+ 
     for i, tp in enumerate(tmpl.paragraphs):
         if i in skip:
             continue
@@ -811,11 +844,11 @@ def _copy_template_title(doc: Document, d: dict):
             _append(p19)
             continue
         _append(new_p)
-
+ 
     p39 = copy.deepcopy(tmpl.paragraphs[39]._element)
     _set_p_text(p39, "2026г.")
     _append(p39)
-
+ 
 def _auto_toc(doc, line_v: int):
     _para(doc, "Содержание", bold=True, center=True, size_pt=14,
           line=line_v, first_line=0, space_after=0)
@@ -834,7 +867,7 @@ def _auto_toc(doc, line_v: int):
     uf = OxmlElement("w:updateFields")
     uf.set(qn("w:val"), "true")
     settings.append(uf)
-
+ 
 def _add_page_numbers(doc: Document) -> None:
     from docx.opc.part import Part
     from docx.opc.packuri import PackURI
@@ -890,8 +923,8 @@ def _add_page_numbers(doc: Document) -> None:
         pg_num = OxmlElement('w:pgNumType')
         sectPr.append(pg_num)
     pg_num.set(qn('w:start'), '1')
-
-
+ 
+ 
 def make_zadaniye_word(raw_text: str, d: dict) -> bytes:
     lv_ = 360
     doc = Document()
@@ -912,8 +945,8 @@ def make_zadaniye_word(raw_text: str, d: dict) -> bytes:
     _add_page_numbers(doc)
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf.getvalue()
-
-
+ 
+ 
 def make_word(raw_text: str, d: dict) -> bytes:
     if d.get("service") == "zadaniye":
         return make_zadaniye_word(raw_text, d)
@@ -956,15 +989,15 @@ def make_word(raw_text: str, d: dict) -> bytes:
     _add_page_numbers(doc)
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf.getvalue()
-
-
+ 
+ 
 def t_progress(d: dict, pct: int, status: str) -> str:
     bar = "█"*(pct//10) + "░"*(10-pct//10)
     def _e(t): return str(t).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
     return (f"⚙️ <b>{SVC_TM.get(d.get('service','referat'),'Iş')} taýarlanýar...</b>\n\n"
             f"📝 <i>{_e(d.get('theme',''))}</i> \n👤 {_e(d.get('fullname',''))}\n\n"
             f"<code>[{bar}]</code> <b>{pct}%</b>\n<i>{_e(status)}</i>")
-
+ 
 def t_summary(d: dict) -> str:
     mug = d.get('teacher','—')
     tp  = d.get('teacher_position','')
@@ -982,7 +1015,7 @@ def t_summary(d: dict) -> str:
             f"📏 Aralyk : {_e(spc_str(d.get('spacing','default')))}\n"
             f"📄 Sahypa : {_e(d.get('pages','—'))}\n"
             f"🔗 Çeşme  : {_e(d.get('sources','—'))}\n")
-
+ 
 async def send_file(uid: int, bot: Bot) -> None:
     if uid not in PAYMENT_PENDING:
         await bot.send_message(uid, "❌ Faýl tapylmady."); return
@@ -996,7 +1029,7 @@ async def send_file(uid: int, bot: Bot) -> None:
                  f"📝 {d.get('theme', '')}\n\n"
                  f"Üstünlik! 🎓   Täze sargyt: /start"),
         parse_mode="HTML")
-
+ 
 async def deliver(uid: int, bot: Bot):
     if uid in CANCELLED_GENERATES:
         CANCELLED_GENERATES.discard(uid)
@@ -1023,11 +1056,11 @@ async def deliver(uid: int, bot: Bot):
         f"📎 Töleg geçirensoň <b>çegiňizi ýa screenshotyňyzy</b> iberiň.\n"
         f"<i>Çek gelenden soň admin tassyklar we faýl size iberiler.</i>",
         parse_mode="HTML")
-
-
+ 
+ 
 router = Router()
-
-
+ 
+ 
 @router.callback_query(St.szad1, F.data == "req:yes")
 async def hz_req_yes(cb: CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
@@ -1040,7 +1073,7 @@ async def hz_req_yes(cb: CallbackQuery, state: FSMContext):
         "✅ Gutaransoň <b>«Talaplarym taýar»</b> düwmesine basyň:",
         KB_REQ_DONE)
     await state.set_state(St.szad2); await cb.answer()
-
+ 
 @router.message(St.szad2)
 async def hz_req_text(msg: Message, bot: Bot, state: FSMContext):
     uid = msg.from_user.id
@@ -1085,7 +1118,7 @@ async def hz_req_text(msg: Message, bot: Bot, state: FSMContext):
         "Ýene iberip bilersiňiz ýa-da:\n"
         "✅ <b>«Talaplarym taýar»</b> düwmesine basyň.",
         parse_mode="HTML", reply_markup=KB_REQ_DONE)
-
+ 
 @router.callback_query(St.szad2, F.data == "req:done")
 async def hz_req_done(cb: CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
@@ -1098,7 +1131,7 @@ async def hz_req_done(cb: CallbackQuery, state: FSMContext):
         "📌 <b>2/2:</b> Zadaniýanyň temasyny ýazyň\n"
         "<i>Mysal: Maglumat howpsuzlygynyň esaslary</i>")
     await state.set_state(St.szad3); await cb.answer()
-
+ 
 @router.callback_query(St.szad1, F.data == "req:no")
 async def hz_req_no(cb: CallbackQuery, state: FSMContext):
     await state.update_data(has_req=False, req_text="")
@@ -1107,7 +1140,7 @@ async def hz_req_no(cb: CallbackQuery, state: FSMContext):
         "📌 <b>2/2:</b> Zadaniýanyň temasyny ýazyň\n"
         "<i>Mysal: Maglumat howpsuzlygynyň esaslary</i>")
     await state.set_state(St.szad3); await cb.answer()
-
+ 
 @router.message(St.szad3)
 async def hz_tema(msg: Message, state: FSMContext):
     theme = msg.text.strip()
@@ -1148,7 +1181,7 @@ async def hz_tema(msg: Message, state: FSMContext):
         ACTIVE_GENERATES.discard(uid_z)
         ZADANIYE_GENERATING.discard(uid_z)
         await state.clear()
-
+ 
 @router.callback_query(F.data == "back:start")
 async def h_back(cb: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -1165,7 +1198,7 @@ async def h_back(cb: CallbackQuery, state: FSMContext):
         parse_mode="HTML", reply_markup=KB_SVC)
     await state.set_state(St.s01)
     await cb.answer()
-
+ 
 @router.message(CommandStart())
 async def h_start(msg: Message, bot: Bot, state: FSMContext):
     await state.clear()
@@ -1200,7 +1233,7 @@ async def h_start(msg: Message, bot: Bot, state: FSMContext):
         "📌 <b>1/13:</b> Haýsy hyzmaty isleýärsiňiz?",
         parse_mode="HTML", reply_markup=KB_SVC)
     await state.set_state(St.s01)
-
+ 
 @router.callback_query(St.s01, F.data.startswith("svc:"))
 async def h01(cb: CallbackQuery, state: FSMContext):
     svc = cb.data.split(":")[1]; await state.update_data(service=svc)
@@ -1220,7 +1253,7 @@ async def h01(cb: CallbackQuery, state: FSMContext):
             "• <b>Talapsyz</b> — adaty GOST görnüşi", KB_REQ)
         await state.set_state(St.s02)
     await cb.answer()
-
+ 
 @router.callback_query(St.s02, F.data == "req:yes")
 async def h02_yes(cb: CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
@@ -1233,7 +1266,7 @@ async def h02_yes(cb: CallbackQuery, state: FSMContext):
         "✅ Gutaransoň <b>«Talaplarym taýar»</b> düwmesine basyň:",
         KB_REQ_DONE)
     await state.set_state(St.s02b); await cb.answer()
-
+ 
 @router.message(St.s02b)
 async def h02b(msg: Message, bot: Bot, state: FSMContext):
     uid = msg.from_user.id
@@ -1295,7 +1328,7 @@ async def h02b(msg: Message, bot: Bot, state: FSMContext):
             parse_mode="HTML", reply_markup=KB_REQ_DONE)
     else:
         await msg.answer("⚠️ Hiç zat tapylmady, täzeden iberiň.", reply_markup=KB_REQ_DONE)
-
+ 
 @router.callback_query(St.s02b, F.data == "req:done")
 async def h02b_done(cb: CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
@@ -1308,7 +1341,7 @@ async def h02b_done(cb: CallbackQuery, state: FSMContext):
         "📌 <b>3/13:</b> Uniwersitetiňiziň doly adyny ýazyň\n"
         "<i>Mysal: Türkmenistanyň Döwlet Energetika Instituty</i>")
     await state.set_state(St.s03); await cb.answer()
-
+ 
 @router.callback_query(St.s02, F.data == "req:no")
 async def h02_no(cb: CallbackQuery, state: FSMContext):
     await state.update_data(has_req=False, req_text="")
@@ -1317,7 +1350,7 @@ async def h02_no(cb: CallbackQuery, state: FSMContext):
         "📌 <b>3/13:</b> Uniwersitetiňiziň doly adyny ýazyň\n"
         "<i>Mysal: Türkmenistanyň Döwlet Energetika Instituty</i>")
     await state.set_state(St.s03); await cb.answer()
-
+ 
 @router.message(St.s03)
 async def h03(msg: Message, state: FSMContext):
     if len(msg.text.strip()) < 4: await msg.answer("❌ Iň az 4 harp ýazyň."); return
@@ -1326,7 +1359,7 @@ async def h03(msg: Message, state: FSMContext):
                      "<i>Mysal: Ykdysadyýet nazaryýeti, Maglumat howpsuzlygy</i>\n\n"
                      "↩️ Täzeden başlamak: /start", parse_mode="HTML")
     await state.set_state(St.s04)
-
+ 
 @router.message(St.s04)
 async def h04(msg: Message, state: FSMContext):
     if len(msg.text.strip()) < 3: await msg.answer("❌ Iň az 3 harp ýazyň."); return
@@ -1336,7 +1369,7 @@ async def h04(msg: Message, state: FSMContext):
         "⚠️ <i>Tema anyk we doly bolmaly — AI şol temany şablona salar</i>\n\n"
         "<i>Mysal: Türkmenistanda ykdysady ösüşiň häzirki ýagdaýy</i>", parse_mode="HTML")
     await state.set_state(St.s05)
-
+ 
 @router.message(St.s05)
 async def h05(msg: Message, state: FSMContext):
     theme = msg.text.strip()
@@ -1347,7 +1380,7 @@ async def h05(msg: Message, state: FSMContext):
     await msg.answer(f"✅ Tema: {theme}\n\n📌 <b>6/13:</b> Adyňyzy we Familiýaňyzy ýazyň\n"
                      "<i>Mysal: Myrat Mämmedow</i>", parse_mode="HTML")
     await state.set_state(St.s06)
-
+ 
 @router.message(St.s06)
 async def h06(msg: Message, state: FSMContext):
     if len(msg.text.strip()) < 3: await msg.answer("❌ Dogry ýazyň."); return
@@ -1355,13 +1388,13 @@ async def h06(msg: Message, state: FSMContext):
     await msg.answer("✅ Kabul edildi!\n\n📌 <b>7/13:</b> Haýsy kursda okaýarsyňyz?",
                      parse_mode="HTML", reply_markup=KB_CRS)
     await state.set_state(St.s07)
-
+ 
 @router.callback_query(St.s07, F.data.startswith("crs:"))
 async def h07(cb: CallbackQuery, state: FSMContext):
     n = cb.data.split(":")[1]; await state.update_data(course=n)
     await ask(cb, f"✅ {n}-nji kurs!\n\n📌 <b>8/13:</b> Toparыňyzyň adyny ýazyň\n<i>Mysal: EHM-22, IT-21B</i>")
     await state.set_state(St.s08); await cb.answer()
-
+ 
 @router.message(St.s08)
 async def h08(msg: Message, state: FSMContext):
     await state.update_data(group=msg.text.strip())
@@ -1369,7 +1402,7 @@ async def h08(msg: Message, state: FSMContext):
                      "<i>Mugallym ýok bolsa — «Geç» basyň</i>",
                      parse_mode="HTML", reply_markup=KB_SKIP)
     await state.set_state(St.s09)
-
+ 
 @router.message(St.s09)
 async def h09_text(msg: Message, state: FSMContext):
     teacher = msg.text.strip()
@@ -1404,7 +1437,7 @@ async def h09_text(msg: Message, state: FSMContext):
         "✅ Mugallym kabul edildi!\n\n📌 <b>9б/13:</b> Mugallymyň wezipesini ýazyň <b>(HÖKMAN)</b>\n"
         "<i>Mysal: доцент, профессор, ст. преподаватель</i>", parse_mode="HTML")
     await state.set_state(St.s09b)
-
+ 
 @router.message(St.s09b)
 async def h09b(msg: Message, state: FSMContext):
     if len(msg.text.strip()) < 2: await msg.answer("❌ Iň az 2 harp ýazyň."); return
@@ -1412,7 +1445,7 @@ async def h09b(msg: Message, state: FSMContext):
     await msg.answer("✅ Kabul edildi!\n\n📌 <b>10/13:</b> Näçe esasy bölüm bolmaly?",
                      parse_mode="HTML", reply_markup=KB_SEC)
     await state.set_state(St.s10)
-
+ 
 @router.callback_query(St.s09, F.data == "skip:teacher")
 async def h09_skip(cb: CallbackQuery, state: FSMContext):
     await state.update_data(teacher="", teacher_position="")
@@ -1424,7 +1457,7 @@ async def h09_skip(cb: CallbackQuery, state: FSMContext):
         return
     await ask(cb, "✅ Geçildi!\n\n📌 <b>10/13:</b> Näçe esasy bölüm bolmaly?", KB_SEC)
     await state.set_state(St.s10); await cb.answer()
-
+ 
 @router.callback_query(St.s10, F.data.startswith("sec:"))
 async def h10(cb: CallbackQuery, state: FSMContext):
     n = int(cb.data.split(":")[1]); await state.update_data(sections=n)
@@ -1436,7 +1469,7 @@ async def h10(cb: CallbackQuery, state: FSMContext):
         f"✅ {n} bölüm!\n\n📌 <b>11/13:</b> Setirler aralygy näçe?\n\n"
         "• <b>Adaty (1.5)</b> — GOST standart\n• <b>Üýtgetmek</b> — 1.0 / 1.25 / 1.5", KB_SPC)
     await state.set_state(St.s11); await cb.answer()
-
+ 
 @router.callback_query(St.s11, F.data == "spc:default")
 async def h11_def(cb: CallbackQuery, state: FSMContext):
     await state.update_data(spacing="default")
@@ -1444,14 +1477,14 @@ async def h11_def(cb: CallbackQuery, state: FSMContext):
         "✅ Setirler aralygy <b>1.5</b> saýlandy!\n\n📌 <b>12/13:</b> Näçe sahypa?\n\n"
         "💡 <i>10—20 maslahat</i>\nSan ýazyň <i>(mysal: 15)</i>:")
     await state.set_state(St.s12); await cb.answer()
-
+ 
 @router.callback_query(St.s11, F.data == "spc:custom")
 async def h11_cus(cb: CallbackQuery, state: FSMContext):
     await ask(cb,
         "✏️ <b>Setirler aralygyny saýlaň:</b>\n\n"
         "• <b>1.0</b> — gysga\n• <b>1.25</b> — orta\n• <b>1.5</b> — GOST", KB_SPCV)
     await state.set_state(St.s11b); await cb.answer()
-
+ 
 @router.callback_query(St.s11b, F.data.startswith("spv:"))
 async def h11b(cb: CallbackQuery, state: FSMContext):
     val = cb.data.split(":")[1]; await state.update_data(spacing=val)
@@ -1459,7 +1492,7 @@ async def h11b(cb: CallbackQuery, state: FSMContext):
         f"✅ Setirler aralygy <b>{val}</b> saýlandy!\n\n📌 <b>12/13:</b> Näçe sahypa?\n\n"
         "💡 <i>10—20 maslahat</i>\nSan ýazyň <i>(mysal: 15)</i>:")
     await state.set_state(St.s12); await cb.answer()
-
+ 
 @router.message(St.s12)
 async def h12(msg: Message, state: FSMContext):
     try: n = int(msg.text.strip())
@@ -1470,7 +1503,7 @@ async def h12(msg: Message, state: FSMContext):
         "✅ Kabul edildi!\n\n📌 <b>13/13:</b> «Список литературы» näçe çeşme?\n"
         "<i>8—20 arasynda saýlaň</i>", parse_mode="HTML", reply_markup=kb_src())
     await state.set_state(St.s13)
-
+ 
 async def _run_generate(cb: CallbackQuery, state: FSMContext, d: dict = None):
     if d is None:
         d = await state.get_data()
@@ -1511,17 +1544,27 @@ async def _run_generate(cb: CallbackQuery, state: FSMContext, d: dict = None):
     finally:
         ACTIVE_GENERATES.discard(uid_gen)
         await state.clear()
-
+ 
 @router.callback_query(St.s13, F.data.startswith("src:"))
 async def h13_generate(cb: CallbackQuery, state: FSMContext):
     n = int(cb.data.split(":")[1]); await state.update_data(sources=n)
     d = await state.get_data()
     await _run_generate(cb, state, d)
-
-
+ 
+ 
+# ✅ DÜZEDIŞ #3: F.video handler — admin üçin hem, ulanyjy üçin hem ikisini birleşdirdim
 @router.message(F.video | F.video_note)
-async def h_receipt_video(msg: Message):
+async def h_video(msg: Message):
     uid = msg.from_user.id
+    # Admin bolsa — file_id ber
+    if uid in ADMIN_IDS:
+        fid = msg.video.file_id if msg.video else msg.video_note.file_id
+        await msg.answer(
+            f"✅ <b>Wideo file_id:</b>\n\n<code>{fid}</code>\n\n"
+            f"Şony <code>INTRO_VIDEO_URL</code>-e ýaz.",
+            parse_mode="HTML")
+        return
+    # Adaty ulanyjy we töleg garaşýar
     if uid not in PAYMENT_PENDING:
         return
     await msg.answer(
@@ -1531,7 +1574,7 @@ async def h_receipt_video(msg: Message):
         "📄 Faýl (PDF, PNG, JPG)\n\n"
         "Töleg screenshotyny ýa-da çek suratyny iberiň:",
         parse_mode="HTML")
-
+ 
 @router.message(F.photo | F.document)
 async def h_receipt(msg: Message, bot: Bot, state: FSMContext):
     uid = msg.from_user.id
@@ -1573,7 +1616,7 @@ async def h_receipt(msg: Message, bot: Bot, state: FSMContext):
                          parse_mode="HTML")
     else:
         await msg.answer("⚠️ Çek iberilmedi, täzeden synanyşyň.", parse_mode="HTML")
-
+ 
 @router.callback_query(F.data.startswith("confirm:"))
 async def h_confirm(cb: CallbackQuery, bot: Bot):
     if cb.from_user.id not in ADMIN_IDS:
@@ -1596,7 +1639,7 @@ async def h_confirm(cb: CallbackQuery, bot: Bot):
         await bot.send_message(uid, "✅ <b>Tölegiňiz tassyklandy!</b> Faýlyňyz häzir iberilýär...",
                                parse_mode="HTML")
     except Exception: pass
-
+ 
 @router.callback_query(F.data.startswith("reject:"))
 async def h_reject(cb: CallbackQuery, bot: Bot):
     if cb.from_user.id not in ADMIN_IDS:
@@ -1622,13 +1665,13 @@ async def h_reject(cb: CallbackQuery, bot: Bot):
             f"çegiňizi täzeden iberiň ýa-da admin bilen habarlaşyň.",
             parse_mode="HTML")
     except Exception: pass
-
+ 
 @router.message(F.text.regexp(r"^/send\s+\d+"))
 async def a_send(msg: Message, bot: Bot):
     if msg.from_user.id not in ADMIN_IDS: return
     uid = int(msg.text.split()[1]); await deliver(uid, bot)
     await msg.answer(f"✅ {uid} iberildi.")
-
+ 
 @router.message(F.text == "/orders")
 async def a_orders(msg: Message):
     if msg.from_user.id not in ADMIN_IDS: return
@@ -1638,7 +1681,7 @@ async def a_orders(msg: Message):
         d = info["data"]
         lines.append(f"👤 <code>{uid}</code> | <i>{d.get('theme','?')[:25]}</i> | {d.get('pages','?')} sah.\n   /send {uid}\n")
     await msg.answer("\n".join(lines), parse_mode="HTML")
-
+ 
 @router.message(F.text == "/admin")
 async def a_help(msg: Message):
     if msg.from_user.id not in ADMIN_IDS: return
@@ -1648,44 +1691,39 @@ async def a_help(msg: Message):
         "<code>/send &lt;id&gt;</code> — iber\n"
         "<code>/getfileid</code> — wideo iberip file_id al",
         parse_mode="HTML")
-
+ 
 @router.message(F.text == "/getfileid")
 async def a_getfileid(msg: Message):
     if msg.from_user.id not in ADMIN_IDS: return
     await msg.answer("📹 Indi wideoňy şu söhbete iber — file_id-ni bererin.")
-
-@router.message(F.video)
-async def a_video_fileid(msg: Message):
-    if msg.from_user.id not in ADMIN_IDS: return
-    fid = msg.video.file_id
-    await msg.answer(
-        f"✅ <b>Wideo file_id:</b>\n\n<code>{fid}</code>\n\n"
-        f"Şony <code>INTRO_VIDEO_URL</code>-e ýaz.",
-        parse_mode="HTML")
-
-
+ 
+ 
 async def main():
     from aiogram.client.default import DefaultBotProperties
     from aiogram.client.session.aiohttp import AiohttpSession
-
+ 
     session = AiohttpSession(timeout=300)
     bot = Bot(token=BOT_TOKEN, session=session,
               default=DefaultBotProperties(parse_mode="HTML"))
     me  = await bot.get_me()
     log.info(f"✅ @{me.username} işe başlady!")
-
-    try:
-        from aiogram.fsm.storage.redis import RedisStorage
-        redis_url = os.getenv("REDIS_URL", "redis://red-d7h6f99j2pic73furhu0:6379")
-        storage = RedisStorage.from_url(redis_url)
-        log.info("✅ Redis storage ulanylýar")
-    except Exception:
+ 
+    # ✅ DÜZEDIŞ #5: Redis URL env-den, hardcode aýryldy
+    storage = None
+    if REDIS_URL and _HAS_REDIS:
+        try:
+            storage = RedisStorage.from_url(REDIS_URL)
+            log.info("✅ Redis storage ulanylýar")
+        except Exception as e:
+            log.warning(f"⚠️ Redis ulanylmady ({e}), MemoryStorage-a geçýär")
+            storage = MemoryStorage()
+    else:
         storage = MemoryStorage()
         log.info("⚠️  MemoryStorage ulanylýar (bot ýapylsa state ýitýär)")
-
+ 
     dp  = Dispatcher(storage=storage)
     dp.include_router(router)
-
+ 
     while True:
         try:
             await dp.start_polling(
@@ -1696,7 +1734,8 @@ async def main():
         except Exception as e:
             log.error(f"Polling error: {e} — 5 sek garaşyp täzeden başlanýar")
             await asyncio.sleep(5)
-
-
+ 
+ 
 if __name__ == "__main__":
     asyncio.run(main())
+ 
