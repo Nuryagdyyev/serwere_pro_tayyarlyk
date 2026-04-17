@@ -1676,7 +1676,7 @@ async def main():
 
     try:
         from aiogram.fsm.storage.redis import RedisStorage
-        redis_url = os.getenv("REDIS_URL", "redis://localhost")
+        redis_url = os.getenv("REDIS_URL", "redis://redis://red-d7h6f99j2pic73furhu0:6379")
         storage = RedisStorage.from_url(redis_url)
         log.info("✅ Redis storage ulanylýar")
     except Exception:
