@@ -52,7 +52,7 @@ if not BOT_TOKEN or not DEEPSEEK_API_KEY:
     )
 
 ADMIN_IDS        = [8512644114, 7404431806]
-INTRO_VIDEO_URL  = "https://youtu.be/8YD65xbNwOQ?si=ouD9EA283C3MPV1X"
+INTRO_VIDEO_URL  = "https://youtu.be/FX7MlvKpGqA?si=gsmJpuFiQ_gHKFN8"
 DEEPSEEK_URL     = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL   = "deepseek-chat"
 CARD_NUMBER      = "2202 2084 5873 0067"
